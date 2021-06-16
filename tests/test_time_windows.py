@@ -24,7 +24,12 @@ def test_in_window(now, expected):
     )
     assert in_window(now, w) == expected
     # now test wraparound windows by inverting the sense
-    # assert in_window(now, 13, 11, "US/Eastern") != expected
+    reverse_w = Window(
+        lambda x: True,
+        datetime.time(hour=13, tzinfo=pytz.timezone("US/Eastern")),
+        datetime.time(hour=11, tzinfo=pytz.timezone("US/Eastern")),
+        )
+    assert in_window(now, reverse_w) != expected
 
 
 # @pytest.skip

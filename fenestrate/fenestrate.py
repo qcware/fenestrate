@@ -53,7 +53,7 @@ class Window:
                 ),
                 to_time=arrow.Arrow.fromdatetime(
                     datetime.datetime.combine(d, self.to_time)
-                ).shift(day=1),
+                ).shift(days=1),
             )
         return result
 
@@ -71,12 +71,11 @@ def in_window(now: arrow, window: Window) -> bool:
     this, we reify the window for today and yesterday
 
     """
-    if window.from_time <= window.to_time:
-        rw = window.reify_on_date(now.date())
-        return now.is_between(rw['from_time'], rw['to_time'])
-    else:
-        rw = window.reify_on_date(now.shift(day=-1).date())
-        return now.is_between(rw['from_time'], rw['to_time'])
+    today = window.reify_on_date(now.date())
+    yesterday = window.reify_on_date(now.shift(days=-1).date())
+    return now.is_between(today["from_time"], today["to_time"]) or now.is_between(
+        yesterday["from_time"], yesterday["to_time"]
+    )
 
 
 def in_nonexcluded_window(
