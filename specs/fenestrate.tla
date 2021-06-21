@@ -23,18 +23,19 @@ WINDOWS == SELECTORS \X TIMES \X TIMES
 \* All possible datetimes
 DATETIMES == DAYS \X TIMES
 
-(*Whether or not the given date/time falls within the window specified by the
-given window.  This requires that the window's selector match the given day
-and that the datetime's time falls after the start time... and
-- If the end time is greater than the start time, then ... and before the end time
-- If the end time is less than the start time, representing a window extending
-  to the next day, then we can't comment on the end time; we just have to go through
-  the end of the day and can't comment on the wraparound, BUT we have to check this
-  against the time window of the day before
+(*Whether or not the given datetime matches the window.
 
-Note that a window is defined by the day on which its start time exists, so
-for example a window (24-hour day) starting at 23 and ending at 2 would NOT
-match a time of 1, although the previous day's window might.*)
+They match if 
+  the window's from_time < to_time and the datetime,
+  the datetime is between those,
+  and the selector matches the datetime's date
+  
+  or
+  
+  the window's from_time > to_time
+  the datetime < to_time
+  and the selector matches the day BEFORE the datetime's date
+*)
 
 in_window(window, datetime) ==
   LET
@@ -44,11 +45,11 @@ in_window(window, datetime) ==
     from == window[2]
     to == window[3]
   IN
-    /\ selector[day]
     /\ from <= to => /\ from <= time
                      /\ time <= to
-    /\ from > to =>  /\ from <= time
-                     /\ time <= CHOOSE t \in TIMES : \A t2 \in TIMES: t >= t2
+                     /\ selector[day]
+    /\ from > to =>  /\ time < to
+                     /\ selector[day-1]
 
 \* this needs to check now against windows for the previous day.                     
 in_nonexcluded_windows(windows, exclusions, now) ==
@@ -103,5 +104,5 @@ Termination == <>(pc = "Done")
 \* END TRANSLATION 
 =============================================================================
 \* Modification History
-\* Last modified Wed Jun 16 14:07:27 CDT 2021 by vputz
+\* Last modified Mon Jun 21 09:11:40 CDT 2021 by vputz
 \* Created Wed Jun 16 10:07:32 CDT 2021 by vputz
