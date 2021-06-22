@@ -22,6 +22,7 @@ pyls-isort = "^0.2.2"
 invoke = "^1.5.0"
 watchdog = {extras = ["watchmedo"], version = "^2.1.2"}
 pytest-xdist = {extras = ["psutil"], version = "^2.3.0"}
+Sphinx = "^4.0.2"
 
 [build-system]
 requires = ["poetry-core>=1.0.0"]
