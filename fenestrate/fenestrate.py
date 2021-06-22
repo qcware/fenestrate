@@ -1,12 +1,13 @@
 """A package to handle availability windows in a very generic fashion.
 """
 
-import attr
-import arrow
 import datetime
-from typing import Callable, Iterator, Optional
-from icontract import require
 from functools import reduce
+from typing import Callable, Iterator, Optional
+
+import arrow
+import attr
+from icontract import require
 
 Selector = Callable[[datetime.date], bool]
 
@@ -183,21 +184,20 @@ def active_windows_on_day(
     return {w.reify_on_date(d) for w in windows if w.is_active_on_day(d)}
 
 
-def first_window(windows: set[ConcreteWindow])->ConcreteWindow:
-    """First window in the set.
-    """
+def first_window(windows: set[ConcreteWindow]) -> ConcreteWindow:
+    """First window in the set."""
     return sorted(windows, key=lambda x: x.from_time)[0]
 
 
 def concrete_windows(
-        today: datetime.date, windows: set[Window], max_days: int = 7
+    today: datetime.date, windows: set[Window], max_days: int = 7
 ) -> Iterator[ConcreteWindow]:
     """Returns an iterator of ConcreteWindow objects beginning 'today'.
 
     The concrete windows are made from the given abstract windows and merged
     if any overlap."""
     # trivial case: if there are no windows, just return
-    if len(windows) == 0 :
+    if len(windows) == 0:
         return
     d1: arrow.Arrow = arrow.get(today)
     d2: arrow.Arrow = d1.shift(days=1)
@@ -221,7 +221,10 @@ def concrete_windows(
 
 
 def concrete_nonexcluded_windows(
-        today: datetime.date, windows: set[Window], exclusions: set[Window] = set(), max_days: int = 7
+    today: datetime.date,
+    windows: set[Window],
+    exclusions: set[Window] = set(),
+    max_days: int = 7,
 ) -> Iterator[ConcreteWindow]:
     """A sequence of availability windows minus exclusions.
 
@@ -233,12 +236,17 @@ def concrete_nonexcluded_windows(
     all_windows = set(concrete_windows(today, windows, max_days))
     all_exclusions = set(concrete_windows(today, exclusions, max_days))
 
-    remaining_windows: set[ConcreteWindow] = reduce(lambda x, y: subtract_exclusion_from_set(y, x), all_exclusions, all_windows)
+    remaining_windows: set[ConcreteWindow] = reduce(
+        lambda x, y: subtract_exclusion_from_set(y, x), all_exclusions, all_windows
+    )
     return (x for x in sorted(remaining_windows, key=lambda x: x.from_time))
 
 
 def next_window(
-        now: arrow.Arrow, windows: set[Window], exclusions: set[Window] = set(), max_days: int = 7
+    now: arrow.Arrow,
+    windows: set[Window],
+    exclusions: set[Window] = set(),
+    max_days: int = 7,
 ) -> Optional[ConcreteWindow]:
     """Finds the next available concrete window that is not excluded.
 
@@ -250,7 +258,9 @@ def next_window(
     window which is not occluded by an exclusion.  Takes the intersection
     of the times to try and provide a concrete window.
     """
-    window_iter = concrete_nonexcluded_windows(now.date(), windows, exclusions, max_days)
+    window_iter = concrete_nonexcluded_windows(
+        now.date(), windows, exclusions, max_days
+    )
     w = next(window_iter)
     while w.from_time < now:
         w = next(window_iter)
