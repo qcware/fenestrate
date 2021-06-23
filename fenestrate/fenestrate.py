@@ -1,7 +1,7 @@
 """A package to handle availability windows in a very generic fashion.
 """
-
 import datetime
+from abc import ABC, abstractmethod
 from functools import reduce
 from typing import Callable, Iterator, Optional
 
@@ -22,6 +22,7 @@ class ConcreteWindow:
 
     from_time: arrow.Arrow = attr.ib(validator=attr.validators.instance_of(arrow.Arrow))
     to_time: arrow.Arrow = attr.ib(validator=attr.validators.instance_of(arrow.Arrow))
+    description: str = attr.ib(default="")
 
 
 def overlaps(w1: ConcreteWindow, w2: ConcreteWindow) -> bool:
@@ -30,7 +31,7 @@ def overlaps(w1: ConcreteWindow, w2: ConcreteWindow) -> bool:
 
 
 @attr.s(frozen=True)
-class Window:
+class AbstractWindow(ABC):
     """A class representing a very abstract "availability window".
 
     It contains an abstract selector, which is a lambda function taking a date,
@@ -47,6 +48,16 @@ class Window:
     """
 
     is_active_on_day: Selector = attr.ib(validator=attr.validators.is_callable())
+    description: str = attr.ib(default="", kw_only=True)
+
+    @abstractmethod
+    def reify_on_date(self, d: datetime.date) -> ConcreteWindow:
+        pass
+
+
+@attr.s(frozen=True)
+class DailyWindow(AbstractWindow):
+
     from_time: datetime.time = attr.ib(
         validator=attr.validators.instance_of(datetime.time)
     )
@@ -64,6 +75,7 @@ class Window:
                 to_time=arrow.Arrow.fromdatetime(
                     datetime.datetime.combine(d, self.to_time)
                 ),
+                description=self.description,
             )
         else:
             result = ConcreteWindow(
@@ -73,11 +85,12 @@ class Window:
                 to_time=arrow.Arrow.fromdatetime(
                     datetime.datetime.combine(d, self.to_time)
                 ).shift(days=1),
+                description=self.description,
             )
         return result
 
 
-def in_window(now: arrow.Arrow, window: Window) -> bool:
+def in_window(now: arrow.Arrow, window: AbstractWindow) -> bool:
     """Whether or not the time represented by 'now' falls in the given window.
 
     If the window is normally-ordered (from_time < to_time), then just
@@ -98,7 +111,9 @@ def in_window(now: arrow.Arrow, window: Window) -> bool:
 
 
 def in_nonexcluded_window(
-    now: arrow.Arrow, windows: set[Window], exclusions: set[Window] = set()
+    now: arrow.Arrow,
+    windows: set[AbstractWindow],
+    exclusions: set[AbstractWindow] = set(),
 ) -> bool:
     """Whether or not 'now' is in a window but not excluded.
 
@@ -133,6 +148,7 @@ def merge_window_with(
             result_window = ConcreteWindow(
                 from_time=min(result_window.from_time, window.from_time),
                 to_time=max(result_window.to_time, window.to_time),
+                description=result_window.description + window.description,
             )
         else:
             result_remaining_windows = result_remaining_windows | {window}
@@ -149,7 +165,14 @@ def subtract_exclusion_from_window(
         if e.from_time < window.from_time:
             if e.to_time < window.to_time:
                 # (..[..)xx]
-                return {ConcreteWindow(from_time=e.to_time, to_time=window.to_time)}
+                return {
+                    ConcreteWindow(
+                        from_time=e.to_time,
+                        to_time=window.to_time,
+                        description=window.description
+                        + f" started late from {e.description}",
+                    )
+                }
             else:
                 # (..[..]..)
                 return set()
@@ -157,12 +180,29 @@ def subtract_exclusion_from_window(
             if e.to_time < window.to_time:
                 # [xx(..)xx]
                 return {
-                    ConcreteWindow(from_time=window.from_time, to_time=e.from_time),
-                    ConcreteWindow(from_time=e.to_time, to_time=window.to_time),
+                    ConcreteWindow(
+                        from_time=window.from_time,
+                        to_time=e.from_time,
+                        description=window.description
+                        + f" ended early from {e.description}",
+                    ),
+                    ConcreteWindow(
+                        from_time=e.to_time,
+                        to_time=window.to_time,
+                        description=window.description
+                        + f" started late from {e.description}",
+                    ),
                 }
             else:
                 # [xx(..]..)
-                return {ConcreteWindow(from_time=window.from_time, to_time=e.from_time)}
+                return {
+                    ConcreteWindow(
+                        from_time=window.from_time,
+                        to_time=e.from_time,
+                        description=window.description
+                        + " ended early from {e.description}",
+                    )
+                }
     else:
         return {window}
 
@@ -178,7 +218,7 @@ def subtract_exclusion_from_set(
 
 
 def active_windows_on_day(
-    d: datetime.date, windows: set[Window]
+    d: datetime.date, windows: set[AbstractWindow]
 ) -> set[ConcreteWindow]:
     """Concrete windows which start on the given day"""
     return {w.reify_on_date(d) for w in windows if w.is_active_on_day(d)}
@@ -190,7 +230,7 @@ def first_window(windows: set[ConcreteWindow]) -> ConcreteWindow:
 
 
 def concrete_windows(
-    today: datetime.date, windows: set[Window], max_days: int = 7
+    today: datetime.date, windows: set[AbstractWindow], max_days: int = 7
 ) -> Iterator[ConcreteWindow]:
     """Returns an iterator of ConcreteWindow objects beginning 'today'.
 
@@ -222,8 +262,8 @@ def concrete_windows(
 
 def concrete_nonexcluded_windows(
     today: datetime.date,
-    windows: set[Window],
-    exclusions: set[Window] = set(),
+    windows: set[AbstractWindow],
+    exclusions: set[AbstractWindow] = set(),
     max_days: int = 7,
 ) -> Iterator[ConcreteWindow]:
     """A sequence of availability windows minus exclusions.
@@ -244,8 +284,8 @@ def concrete_nonexcluded_windows(
 
 def next_window(
     now: arrow.Arrow,
-    windows: set[Window],
-    exclusions: set[Window] = set(),
+    windows: set[AbstractWindow],
+    exclusions: set[AbstractWindow] = set(),
     max_days: int = 7,
 ) -> Optional[ConcreteWindow]:
     """Finds the next available concrete window that is not excluded.

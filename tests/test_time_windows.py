@@ -5,7 +5,7 @@ import pytest
 import pytz
 
 from fenestrate import selectors
-from fenestrate.fenestrate import (ConcreteWindow, Window,
+from fenestrate.fenestrate import (ConcreteWindow, DailyWindow,
                                    in_nonexcluded_window, in_window,
                                    next_window)
 
@@ -21,14 +21,14 @@ from fenestrate.fenestrate import (ConcreteWindow, Window,
     ],
 )
 def test_in_window(now, expected):
-    w = Window(
+    w = DailyWindow(
         lambda x: True,
         datetime.time(hour=11, tzinfo=pytz.timezone("US/Eastern")),
         datetime.time(hour=13, tzinfo=pytz.timezone("US/Eastern")),
     )
     assert in_window(now, w) == expected
     # now test wraparound windows by inverting the sense
-    reverse_w = Window(
+    reverse_w = DailyWindow(
         lambda x: True,
         datetime.time(hour=13, tzinfo=pytz.timezone("US/Eastern")),
         datetime.time(hour=11, tzinfo=pytz.timezone("US/Eastern")),
@@ -36,15 +36,15 @@ def test_in_window(now, expected):
     assert in_window(now, reverse_w) != expected
 
 
-daily = Window(
-    selectors.daily(),
-    datetime.time(hour=11, tzinfo=pytz.timezone("US/Eastern")),
-    datetime.time(hour=13, tzinfo=pytz.timezone("US/Eastern")),
+daily = DailyWindow(
+    is_active_on_day=selectors.daily(),
+    from_time=datetime.time(hour=11, tzinfo=pytz.timezone("US/Eastern")),
+    to_time=datetime.time(hour=13, tzinfo=pytz.timezone("US/Eastern")),
 )
-weekly = Window(
-    selectors.weekly_on(selectors.Weekday.WEDNESDAY),
-    datetime.time(hour=12, tzinfo=pytz.timezone("US/Eastern")),
-    datetime.time(hour=13, tzinfo=pytz.timezone("US/Eastern")),
+weekly = DailyWindow(
+    is_active_on_day=selectors.weekly_on(selectors.Weekday.WEDNESDAY),
+    from_time=datetime.time(hour=12, tzinfo=pytz.timezone("US/Eastern")),
+    to_time=datetime.time(hour=13, tzinfo=pytz.timezone("US/Eastern")),
 )
 
 
@@ -57,6 +57,7 @@ weekly = Window(
             ConcreteWindow(
                 from_time=arrow.get("2020-06-24 11:00:00").replace(tzinfo="US/Eastern"),
                 to_time=arrow.get("2020-06-24 12:00:00").replace(tzinfo="US/Eastern"),
+                description="",
             ),
         ),
         (
@@ -70,4 +71,5 @@ weekly = Window(
     ],
 )
 def test_next_window_opening(now, expected):
-    assert next_window(now, {daily}, {weekly}) == expected
+    assert next_window(now, {daily}, {weekly}).from_time == expected.from_time
+    assert next_window(now, {daily}, {weekly}).to_time == expected.to_time
