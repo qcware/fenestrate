@@ -47,6 +47,24 @@ This is fairly straightforward using :func:`~fenestrate.in_nonexcluded_window`:
   in_window = in_nonexcluded_window(arrow.now(), windows={daily}, exclusions={weekly_exclusion})
 
 
+Okay, but perhaps we want to see when the next scheduled window is:
+
+.. code-block:: python
+
+  w = next_window(now, {daily}, {weekly_exclusion})
+
+This will return the next subinterval beginning with either `now` (if `now` is currently in a window)
+or the one that begins after `now`.
+
+With a little more effort, you can retrieve a list of all available windows between two
+times (trimmed to be within those two times), or manually create trees of inclusions and exclusions.
+
+While this is underutilized at present, each concrete window contains a data field listing all the
+windows which went into its construction (this could be fleshed out more); in other words,
+if an inclusion is chopped by an exclusion, the resulting `ConcreteWindow` will have a data
+field `ancestors` listing both of those windows as contributing.
+
+
 When can I reschedule?
 ----------------------
 
