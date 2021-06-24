@@ -10,6 +10,5 @@ workflows:
     jobs:
       - python/test:
           version: "3.9.5"
-          args: "--dev"
           pkg-manager: poetry
           test-tool: pytest
