@@ -16,6 +16,4 @@ orbs:
 workflows:
   main:
     jobs:
-      - python/test:
-          pkg-manager: poetry
-          test-tool: pytest
+      - test
