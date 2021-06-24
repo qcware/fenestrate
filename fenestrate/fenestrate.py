@@ -1,6 +1,7 @@
 """A package to handle availability windows in a very generic fashion.
 """
 import datetime
+import itertools
 from abc import ABC, abstractmethod
 from functools import reduce
 from typing import Callable, Iterator, Optional
@@ -34,7 +35,7 @@ class AbstractWindow(ABC):
     description: str = attr.ib(default="", kw_only=True)
 
     @abstractmethod
-    def reify_on_date(self, d: datetime.date) -> 'ConcreteWindow':
+    def reify_on_date(self, d: datetime.date) -> "ConcreteWindow":
         pass
 
 
@@ -48,7 +49,7 @@ class ConcreteWindow:
 
     from_time: arrow.Arrow = attr.ib(validator=attr.validators.instance_of(arrow.Arrow))
     to_time: arrow.Arrow = attr.ib(validator=attr.validators.instance_of(arrow.Arrow))
-    ancestors: tuple[AbstractWindow] = attr.ib(converter=tuple)
+    ancestors: tuple[AbstractWindow, ...] = attr.ib(converter=tuple, default=tuple())
 
 
 def overlaps(w1: ConcreteWindow, w2: ConcreteWindow) -> bool:
@@ -152,106 +153,61 @@ def in_nonexcluded_window(
     return (any(matching_inclusions)) and (not any(matching_exclusions))
 
 
-
-
-def subtract_exclusion_from_set(
-    e: ConcreteWindow, windows: set[ConcreteWindow]
-) -> set[ConcreteWindow]:
-    """Subtracts the exclusion from the set of windows, possibly fragmenting them."""
-    result: set[ConcreteWindow] = set()
-    for w in windows:
-        result = result | subtract_exclusion_from_window(e, w)
-    return result
-
-
-def active_windows_on_day(
-    d: datetime.date, windows: set[AbstractWindow]
-) -> set[ConcreteWindow]:
-    """Concrete windows which start on the given day"""
-    return {w.reify_on_date(d) for w in windows if w.is_active_on_day(d)}
-
-
-def first_window(windows: set[ConcreteWindow]) -> ConcreteWindow:
-    """First window in the set."""
-    return sorted(windows, key=lambda x: x.from_time)[0]
-
-
-def concrete_windows(
-    today: datetime.date, windows: set[AbstractWindow], max_days: int = 7
-) -> Iterator[ConcreteWindow]:
-    """Returns an iterator of ConcreteWindow objects beginning 'today'.
-
-    The concrete windows are made from the given abstract windows and merged
-    if any overlap."""
-    # trivial case: if there are no windows, just return
-    if len(windows) == 0:
-        return
-    d1: arrow.Arrow = arrow.get(today)
-    d2: arrow.Arrow = d1.shift(days=1)
-    active_windows = active_windows_on_day(d1.date(), windows) | active_windows_on_day(
-        d2.date(), windows
-    )
-    while (d1 - arrow.get(today)).days < max_days:
-        while len(active_windows) > 0 and d1.date() < d2.date():
-            # merge the earliest window with others and remove it
-            w = first_window(active_windows)
-            w, active_windows = merge_window_with(w, active_windows)
-            d1 = arrow.get(w.from_time.date())
-            yield w
-        # We've yielded once, so either we have no windows left or d1 == d2.
-        # if we have no windows left, just force the issue
-        if len(active_windows) == 0:
-            d1 = arrow.get(d2.date())
-        while d1.date() >= d2.date():
-            d2 = d2.shift(days=1)
-            active_windows = active_windows | active_windows_on_day(d2.date(), windows)
-
-
-def concrete_nonexcluded_windows(
-    today: datetime.date,
-    windows: set[AbstractWindow],
-    exclusions: set[AbstractWindow] = set(),
-    max_days: int = 7,
-) -> Iterator[ConcreteWindow]:
-    """A sequence of availability windows minus exclusions.
-
-    Reifies the abstract Windows of the availability windows and
-    exclusions and returns a sorted sequence of intervals.  I'd love for this to
-    handle infinite sequences, but honestly it hurt my brain, so we just get all
-    windows and all exclusions in the two operators and intersect them
+def available_windows_between(
+    from_time: arrow.Arrow,
+    to_time: arrow.Arrow,
+    inclusions: set[AbstractWindow],
+    exclusions: set[AbstractWindow],
+) -> IntervalTree:
     """
-    all_windows = set(concrete_windows(today, windows, max_days))
-    all_exclusions = set(concrete_windows(today, exclusions, max_days))
+    Returns an intervaltree representing all concrete inclusions minus exclusions.
 
-    remaining_windows: set[ConcreteWindow] = reduce(
-        lambda x, y: subtract_exclusion_from_set(y, x), all_exclusions, all_windows
+    Creates an IntervalTree with all inclusions from (from_time.date()-1 day)
+    to (to_time.date()), trims intervals before and after those dates,
+    and subtracts the exclusions, decorating any inclusions' data with the
+    exclusions that affect it.
+    """
+    all_dates = arrow.Arrow.range(
+        "day", from_time.shift(days=-1).datetime, to_time.datetime
     )
-    return (x for x in sorted(remaining_windows, key=lambda x: x.from_time))
+    all_inclusions = IntervalTree().union(
+        itertools.chain.from_iterable(
+            concrete_windows_on_date(d.date(), inclusions) for d in all_dates
+        )
+    )
+    all_exclusions = IntervalTree().union(
+        itertools.chain.from_iterable(
+            concrete_windows_on_date(d.date(), exclusions) for d in all_dates
+        )
+    )
+    # so now we have two interval trees, one with all the inclusions and one with
+    # all the exclusions.  For each exclusion, "chop" the inclusions tree so that
+    # the exclusion is removed
+    for interval in all_exclusions:
+        all_inclusions.chop(
+            interval.begin, interval.end, lambda x, islower: x.data + interval.data
+        )
+    # finally, chop everything from the beginning to from_time and from the end to to_time
+    all_inclusions.chop(all_inclusions.begin(), from_time)
+    all_inclusions.chop(to_time, all_inclusions.end())
+    return all_inclusions
 
 
 def next_window(
     now: arrow.Arrow,
-    windows: set[AbstractWindow],
+    inclusions: set[AbstractWindow],
     exclusions: set[AbstractWindow] = set(),
-    max_days: int = 7,
+    max_days: int = 2,
 ) -> Optional[ConcreteWindow]:
     """Finds the next available concrete window that is not excluded.
 
-    "next" here means "with a start time after the given 'now' time", so
-    if 'now' is currently *in* a window, this will return the one that
-    starts *after* the given time
-
-    Given the set of valid windows and exclusions, finds the next
-    window which is not occluded by an exclusion.  Takes the intersection
-    of the times to try and provide a concrete window.
+    "next" here means "if you're in a window, returns that, but if not,
+    returns the one that starts after the current time"
     """
-    window_iter = concrete_nonexcluded_windows(
-        now.date(), windows, exclusions, max_days
+    # I had this nice idea about making iterators, but in reality
+    # using an intervaltree for a given time period is cleaner.
+    concrete_inclusions = available_windows_between(
+        now, now.shift(days=max_days), inclusions, exclusions
     )
-    w = next(window_iter)
-    while w.from_time < now:
-        w = next(window_iter)
-    if w.from_time > now:
-        return w
-    else:
-        return None
+    sorted_inclusions = sorted(concrete_inclusions)
+    return sorted_inclusions[0] if len(sorted_inclusions) > 0 else None
