@@ -9,9 +9,7 @@ workflows:
   main:
     jobs:
       - python/test:
-          executor:
-            name: python/default
-            tag: 3.9.5
+          version: "3.9.5"
           args: "--dev"
           pkg-manager: poetry
           test-tool: pytest
