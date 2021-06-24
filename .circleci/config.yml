@@ -1,9 +1,14 @@
 version: 2.1
 
-executors:
-  default:
-    docker:
-      - image: cimg/python:3.9.5
+jobs:
+  test:
+    executor:
+      name: python/default
+      tag: 3.9.5
+    steps:
+      - python/test:
+          pkg-manager: poetry
+          test-tool: pytest
 
 orbs:
   python: circleci/python@1.4.0
