@@ -1,5 +1,9 @@
 version: 2.1
 
+
+orbs:
+  python: circleci/python@1.4.0
+
 jobs:
   test:
     executor:
@@ -9,9 +13,6 @@ jobs:
       - python/test:
           pkg-manager: poetry
           test-tool: pytest
-
-orbs:
-  python: circleci/python@1.4.0
 
 workflows:
   main:
