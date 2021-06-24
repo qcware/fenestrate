@@ -8,26 +8,9 @@ from typing import Callable, Iterator, Optional
 import arrow
 import attr
 from icontract import require
+from intervaltree import Interval, IntervalTree
 
 Selector = Callable[[datetime.date], bool]
-
-
-@attr.s(frozen=True)
-class ConcreteWindow:
-    """A class representing a very concrete "availability window".
-
-    ...or rather an interval
-    between 'from_time' and 'to_time'
-    """
-
-    from_time: arrow.Arrow = attr.ib(validator=attr.validators.instance_of(arrow.Arrow))
-    to_time: arrow.Arrow = attr.ib(validator=attr.validators.instance_of(arrow.Arrow))
-    description: str = attr.ib(default="")
-
-
-def overlaps(w1: ConcreteWindow, w2: ConcreteWindow) -> bool:
-    """Whether or not w1 and w2 overlap in time"""
-    return not ((w1.to_time < w2.from_time) or (w2.to_time < w1.from_time))
 
 
 @attr.s(frozen=True)
@@ -51,8 +34,26 @@ class AbstractWindow(ABC):
     description: str = attr.ib(default="", kw_only=True)
 
     @abstractmethod
-    def reify_on_date(self, d: datetime.date) -> ConcreteWindow:
+    def reify_on_date(self, d: datetime.date) -> 'ConcreteWindow':
         pass
+
+
+@attr.s(frozen=True)
+class ConcreteWindow:
+    """A class representing a very concrete "availability window".
+
+    ...or rather an interval
+    between 'from_time' and 'to_time'
+    """
+
+    from_time: arrow.Arrow = attr.ib(validator=attr.validators.instance_of(arrow.Arrow))
+    to_time: arrow.Arrow = attr.ib(validator=attr.validators.instance_of(arrow.Arrow))
+    ancestors: tuple[AbstractWindow] = attr.ib(converter=tuple)
+
+
+def overlaps(w1: ConcreteWindow, w2: ConcreteWindow) -> bool:
+    """Whether or not w1 and w2 overlap in time"""
+    return not ((w1.to_time < w2.from_time) or (w2.to_time < w1.from_time))
 
 
 @attr.s(frozen=True)
@@ -75,7 +76,7 @@ class DailyWindow(AbstractWindow):
                 to_time=arrow.Arrow.fromdatetime(
                     datetime.datetime.combine(d, self.to_time)
                 ),
-                description=self.description,
+                ancestors=[self],
             )
         else:
             result = ConcreteWindow(
@@ -85,7 +86,7 @@ class DailyWindow(AbstractWindow):
                 to_time=arrow.Arrow.fromdatetime(
                     datetime.datetime.combine(d, self.to_time)
                 ).shift(days=1),
-                description=self.description,
+                ancestors=[self],
             )
         return result
 
@@ -110,9 +111,32 @@ def in_window(now: arrow.Arrow, window: AbstractWindow) -> bool:
     )
 
 
+def concrete_windows_on_date(
+    d: datetime.date, windows: set[AbstractWindow]
+) -> IntervalTree:
+    result = IntervalTree()
+    for w in windows:
+        cw = w.reify_on_date(d)
+        result.add(Interval(cw.from_time, cw.to_time, [cw]))
+    return result
+
+
+def windows_at_time(now: arrow.Arrow, windows: set[AbstractWindow]):
+    """Returns a set of concrete windows which overlap the given time.
+
+    Keyword Arguments:
+    now: arrow.Arrow
+    windows: set[AbstractWindow]
+    """
+    todays_windows = concrete_windows_on_date(now.date(), windows)
+    yesterdays_windows = concrete_windows_on_date(now.shift(days=-1).date(), windows)
+    all_windows = todays_windows | yesterdays_windows
+    return all_windows.at(now)
+
+
 def in_nonexcluded_window(
     now: arrow.Arrow,
-    windows: set[AbstractWindow],
+    inclusions: set[AbstractWindow],
     exclusions: set[AbstractWindow] = set(),
 ) -> bool:
     """Whether or not 'now' is in a window but not excluded.
@@ -122,89 +146,12 @@ def in_nonexcluded_window(
     and returns whether or not the given time is in an availability window but not
     in an exclusion window
     """
-    matching_inclusions = {x for x in windows if in_window(now, x)}
-    matching_exclusions = {x for x in exclusions if in_window(now, x)}
+    matching_inclusions = windows_at_time(now, inclusions)
+    matching_exclusions = windows_at_time(now, exclusions)
 
     return (any(matching_inclusions)) and (not any(matching_exclusions))
 
 
-def merge_window_with(
-    w: ConcreteWindow, windows: set[ConcreteWindow]
-) -> tuple[ConcreteWindow, set[ConcreteWindow]]:
-    """Merges w with every window in windows.
-
-    This merges the given concrete window w with every window in the
-    given set of windows that overlaps, and then removes every window
-    that overlapped and returns the tuple of
-
-    merged_window, remaining_windows
-    """
-    # print(w)
-    # print(windows)
-    result_window = w
-    result_remaining_windows: set[ConcreteWindow] = set()
-    for window in windows:
-        if overlaps(result_window, window):
-            result_window = ConcreteWindow(
-                from_time=min(result_window.from_time, window.from_time),
-                to_time=max(result_window.to_time, window.to_time),
-                description=result_window.description + window.description,
-            )
-        else:
-            result_remaining_windows = result_remaining_windows | {window}
-    return result_window, result_remaining_windows
-
-
-def subtract_exclusion_from_window(
-    e: ConcreteWindow, window: ConcreteWindow
-) -> set[ConcreteWindow]:
-    """Subtracts the exclusion from the window, returning a possibly empty set."""
-    result: set[ConcreteWindow] = set()
-    # to denote the overlaps below, (..) represents the exclusion and [xx] the window
-    if overlaps(e, window):
-        if e.from_time < window.from_time:
-            if e.to_time < window.to_time:
-                # (..[..)xx]
-                return {
-                    ConcreteWindow(
-                        from_time=e.to_time,
-                        to_time=window.to_time,
-                        description=window.description
-                        + f" started late from {e.description}",
-                    )
-                }
-            else:
-                # (..[..]..)
-                return set()
-        else:
-            if e.to_time < window.to_time:
-                # [xx(..)xx]
-                return {
-                    ConcreteWindow(
-                        from_time=window.from_time,
-                        to_time=e.from_time,
-                        description=window.description
-                        + f" ended early from {e.description}",
-                    ),
-                    ConcreteWindow(
-                        from_time=e.to_time,
-                        to_time=window.to_time,
-                        description=window.description
-                        + f" started late from {e.description}",
-                    ),
-                }
-            else:
-                # [xx(..]..)
-                return {
-                    ConcreteWindow(
-                        from_time=window.from_time,
-                        to_time=e.from_time,
-                        description=window.description
-                        + " ended early from {e.description}",
-                    )
-                }
-    else:
-        return {window}
 
 
 def subtract_exclusion_from_set(
