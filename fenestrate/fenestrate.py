@@ -68,7 +68,18 @@ class ConcreteWindow(ReifiedWindow):
     )
 
     def is_active_at(self, t: arrow.Arrow) -> bool:
-        return t.is_between(self.from_time, self.to_time)
+        """Whether the window is active at the given date/time.
+
+        We use bounds of [) (see
+        https://arrow.readthedocs.io/en/latest/#arrow.arrow.Arrow.is_between)
+        so that the beginning of the window is "valid"; in other
+        words, a time window of 13:00:00-13:00:01 is active at 13:00
+        but not active at 13:00:01.  This can be changed, but it's
+        here so that we can say "you can reschedule at the start of
+        the next available window"
+
+        """
+        return t.is_between(self.from_time, self.to_time, bounds="[)")
 
 
 class NullWindow(ReifiedWindow):
@@ -196,8 +207,10 @@ def available_windows_between(
     and subtracts the exclusions, decorating any inclusions' data with the
     exclusions that affect it.
     """
-    all_dates = arrow.Arrow.range(
-        "day", from_time.shift(days=-1).datetime, to_time.datetime
+    # all_dates turns out to be a generator, so since we iterate over it twice,
+    # just make it a list
+    all_dates = list(
+        arrow.Arrow.range("day", from_time.shift(days=-1).datetime, to_time.datetime)
     )
     all_inclusions = IntervalTree().union(
         itertools.chain.from_iterable(
@@ -209,16 +222,28 @@ def available_windows_between(
             concrete_windows_on_date(d.date(), exclusions) for d in all_dates
         )
     )
-    # so now we have two interval trees, one with all the inclusions and one with
-    # all the exclusions.  For each exclusion, "chop" the inclusions tree so that
-    # the exclusion is removed
+    # so now we have two interval trees, one with all the inclusions
+    # and one with all the exclusions.  For each exclusion, "chop" the
+    # inclusions tree so that the exclusion is removed.
+    #
+    # we have an irritation, since chop
     for interval in all_exclusions:
         all_inclusions.chop(
             interval.begin, interval.end, lambda x, islower: x.data + interval.data
         )
-    # finally, chop everything from the beginning to from_time and from the end to to_time
+    # print("+++")
+    # for interval in sorted(all_inclusions):
+    #     print(f"{interval.begin}-{interval.end}")
+    # print("+++")
+    #
+    # finally, chop everything from the beginning to from_time and
+    # from the end to to_time
     all_inclusions.chop(all_inclusions.begin(), from_time)
     all_inclusions.chop(to_time, all_inclusions.end())
+    # print("---")
+    # for interval in sorted(all_inclusions):
+    #     print(f"{interval.begin}-{interval.end}")
+    # print("---")
     return all_inclusions
 
 
