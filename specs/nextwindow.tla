@@ -31,7 +31,7 @@ WindowMinusExclusion(window, exclusion) ==
   IN { <<start, end>>  \in subtimes \X subtimes :
     /\ ~ Overlaps(<<start, end>>, exclusion)
     /\ start <= end }
-    
+
 \* All the windows minus the times which are excluded
 WindowsMinusExclusions(windows, exclusions) ==
   UNION { WindowMinusExclusion(w, exclusions) : w \in windows }
@@ -77,7 +77,7 @@ Spec == Init /\ [][Next]_vars
 
 Termination == <>(pc = "Done")
 
-\* END TRANSLATION 
+\* END TRANSLATION
 =============================================================================
 \* Modification History
 \* Created Mon Jun 21 10:45:43 CDT 2021 by vputz

@@ -25,13 +25,13 @@ DATETIMES == DAYS \X TIMES
 
 (*Whether or not the given datetime matches the window.
 
-They match if 
+They match if
   the window's from_time < to_time and the datetime,
   the datetime is between those,
   and the selector matches the datetime's date
-  
+
   or
-  
+
   the window's from_time > to_time
   the datetime < to_time
   and the selector matches the day BEFORE the datetime's date
@@ -51,7 +51,7 @@ in_window(window, datetime) ==
     /\ from > to =>  /\ time < to
                      /\ selector[day-1]
 
-\* this needs to check now against windows for the previous day.                     
+\* this needs to check now against windows for the previous day.
 in_nonexcluded_windows(windows, exclusions, now) ==
     /\ \E w \in windows : in_window(w, now)
     /\ ~ \E e \in exclusions : in_window(e, now)
@@ -101,7 +101,7 @@ Spec == Init /\ [][Next]_vars
 
 Termination == <>(pc = "Done")
 
-\* END TRANSLATION 
+\* END TRANSLATION
 =============================================================================
 \* Modification History
 \* Last modified Mon Jun 21 09:11:40 CDT 2021 by vputz

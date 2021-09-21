@@ -4,13 +4,17 @@ import arrow
 import pytest
 import pytz
 from hypothesis import assume, given
-from hypothesis.strategies import (composite, datetimes, sampled_from, sets,
-                                   times)
+from hypothesis.strategies import composite, datetimes, sampled_from, sets, times
 
 from fenestrate import selectors
-from fenestrate.fenestrate import (ConcreteWindow, DailyWindow,
-                                   in_nonexcluded_window, in_window,
-                                   next_window, windows_at_time)
+from fenestrate.fenestrate import (
+    ConcreteWindow,
+    DailyWindow,
+    in_nonexcluded_window,
+    in_window,
+    next_window,
+    windows_at_time,
+)
 
 
 @pytest.mark.parametrize(

@@ -42,7 +42,7 @@ This is fairly straightforward using :func:`~fenestrate.in_nonexcluded_window`:
                  datetime.time(hour=13, tzinfo=pytz.timezone("US/Eastern")))
   weekly_exclusion = Window(selectors.weekly_on(selectors.Weekday.WEDNESDAY),
                             datetime.time(hour=12, tzinfo=pytz.timezone("US/Eastern")),
-                            datetime.time(hour=13, tzinfo=pytz.timezone("US/Eastern")))     
+                            datetime.time(hour=13, tzinfo=pytz.timezone("US/Eastern")))
 
   in_window = in_nonexcluded_window(arrow.now(), windows={daily}, exclusions={weekly_exclusion})
 
@@ -67,5 +67,3 @@ field `ancestors` listing both of those windows as contributing.
 
 When can I reschedule?
 ----------------------
-
-
