@@ -5,14 +5,9 @@ import pytest
 import pytz
 
 from fenestrate import selectors
-from fenestrate.fenestrate import (
-    ConcreteWindow,
-    DailyWindow,
-    in_nonexcluded_window,
-    in_window,
-    next_window,
-    windows_at_time,
-)
+from fenestrate.fenestrate import (ConcreteWindow, DailyWindow,
+                                   in_nonexcluded_window, in_window,
+                                   next_window, windows_at_time)
 
 
 @pytest.mark.parametrize(
@@ -98,3 +93,21 @@ weekly = DailyWindow(
 def test_next_window_opening(now, expected):
     assert next_window(now, {daily}, {weekly}).begin == expected.from_time
     assert next_window(now, {daily}, {weekly}).end == expected.to_time
+
+
+# this is a case on 20210920 where a weekday window for IonQ was reified on a Sunday
+# with a ViolationError.  The problem derived from windows being reified the day
+# prior when checking for wraparounds, but this is incorrect behaviour.  This test attempts
+# to capture this issue.
+#
+# Forge scheduling uses in_nonexcluded_window and next_window, so the forge problem
+# came from windows_at_time and thus concrete_windows_on_date
+def test_weekday_window_on_weekend():
+    weekdays = DailyWindow(
+        is_active_on_day=selectors.weekdays(),
+        from_time=datetime.time(13, 0, tzinfo=datetime.timezone.utc),
+        to_time=datetime.time(2, 0, tzinfo=datetime.timezone.utc),
+    )
+    # now check to see if this is active on a Sunday
+    now = arrow.get("2021-09-19 13:00:00").replace(tzinfo="US/Pacific")
+    assert in_nonexcluded_window(now, {weekdays}) == False
