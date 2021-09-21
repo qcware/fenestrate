@@ -4,7 +4,7 @@ import datetime
 import itertools
 from abc import ABC, abstractmethod
 from functools import reduce
-from typing import Callable, Iterator, Optional
+from typing import Callable, Iterable, Iterator, Optional, TypeVar
 
 import arrow
 import attr
@@ -35,12 +35,26 @@ class AbstractWindow(ABC):
     description: str = attr.ib(default="", kw_only=True)
 
     @abstractmethod
-    def reify_on_date(self, d: datetime.date) -> "ConcreteWindow":
+    def reify_on_date(self, d: datetime.date) -> "ReifiedWindow":
         pass
 
 
+class ReifiedWindow(ABC):
+    @abstractmethod
+    def is_active_at(self, t: arrow.Arrow) -> bool:
+        pass
+
+
+# mypy has trouble with attrs and some converters; see
+# https://github.com/python/mypy/issues/8417.  We should
+# be able to make this nicer with a TypeVar, but mypy
+# gave some other issues, so we're doing a bound type here.
+def tuple_converter(x: Iterable[AbstractWindow]) -> tuple[AbstractWindow, ...]:
+    return tuple[AbstractWindow](x)
+
+
 @attr.s(frozen=True)
-class ConcreteWindow:
+class ConcreteWindow(ReifiedWindow):
     """A class representing a very concrete "availability window".
 
     ...or rather an interval
@@ -49,12 +63,36 @@ class ConcreteWindow:
 
     from_time: arrow.Arrow = attr.ib(validator=attr.validators.instance_of(arrow.Arrow))
     to_time: arrow.Arrow = attr.ib(validator=attr.validators.instance_of(arrow.Arrow))
-    ancestors: tuple[AbstractWindow, ...] = attr.ib(converter=tuple, default=tuple())
+    ancestors: tuple[AbstractWindow, ...] = attr.ib(
+        converter=tuple_converter, default=tuple()
+    )
+
+    def is_active_at(self, t: arrow.Arrow) -> bool:
+        """Whether the window is active at the given date/time.
+
+        We use bounds of [) (see
+        https://arrow.readthedocs.io/en/latest/#arrow.arrow.Arrow.is_between)
+        so that the beginning of the window is "valid"; in other
+        words, a time window of 13:00:00-13:00:01 is active at 13:00
+        but not active at 13:00:01.  This can be changed, but it's
+        here so that we can say "you can reschedule at the start of
+        the next available window"
+
+        """
+        return t.is_between(self.from_time, self.to_time, bounds="[)")
 
 
-def overlaps(w1: ConcreteWindow, w2: ConcreteWindow) -> bool:
+class NullWindow(ReifiedWindow):
+    def is_active_at(self, t: arrow.Arrow) -> bool:
+        return False
+
+
+def overlaps(w1: ReifiedWindow, w2: ReifiedWindow) -> bool:
     """Whether or not w1 and w2 overlap in time"""
-    return not ((w1.to_time < w2.from_time) or (w2.to_time < w1.from_time))
+    if isinstance(w1, ConcreteWindow) and isinstance(w2, ConcreteWindow):
+        return not ((w1.to_time < w2.from_time) or (w2.to_time < w1.from_time))
+    else:
+        return False
 
 
 @attr.s(frozen=True)
@@ -67,28 +105,31 @@ class DailyWindow(AbstractWindow):
         validator=attr.validators.instance_of(datetime.time)
     )
 
-    @require(lambda self, d: self.is_active_on_day(d))
-    def reify_on_date(self, d: datetime.date) -> ConcreteWindow:
-        if self.from_time <= self.to_time:
-            result = ConcreteWindow(
-                from_time=arrow.Arrow.fromdatetime(
-                    datetime.datetime.combine(d, self.from_time)
-                ),
-                to_time=arrow.Arrow.fromdatetime(
-                    datetime.datetime.combine(d, self.to_time)
-                ),
-                ancestors=[self],
-            )
+    def reify_on_date(self, d: datetime.date) -> ReifiedWindow:
+        result: ReifiedWindow
+        if self.is_active_on_day(d):
+            if self.from_time <= self.to_time:
+                result = ConcreteWindow(
+                    from_time=arrow.Arrow.fromdatetime(
+                        datetime.datetime.combine(d, self.from_time)
+                    ),
+                    to_time=arrow.Arrow.fromdatetime(
+                        datetime.datetime.combine(d, self.to_time)
+                    ),
+                    ancestors=[self],
+                )
+            else:
+                result = ConcreteWindow(
+                    from_time=arrow.Arrow.fromdatetime(
+                        datetime.datetime.combine(d, self.from_time)
+                    ),
+                    to_time=arrow.Arrow.fromdatetime(
+                        datetime.datetime.combine(d, self.to_time)
+                    ).shift(days=1),
+                    ancestors=[self],
+                )
         else:
-            result = ConcreteWindow(
-                from_time=arrow.Arrow.fromdatetime(
-                    datetime.datetime.combine(d, self.from_time)
-                ),
-                to_time=arrow.Arrow.fromdatetime(
-                    datetime.datetime.combine(d, self.to_time)
-                ).shift(days=1),
-                ancestors=[self],
-            )
+            result = NullWindow()
         return result
 
 
@@ -107,9 +148,7 @@ def in_window(now: arrow.Arrow, window: AbstractWindow) -> bool:
     """
     today = window.reify_on_date(now.date())
     yesterday = window.reify_on_date(now.shift(days=-1).date())
-    return now.is_between(today.from_time, today.to_time) or now.is_between(
-        yesterday.from_time, yesterday.to_time
-    )
+    return today.is_active_at(now) or yesterday.is_active_at(now)
 
 
 def concrete_windows_on_date(
@@ -118,7 +157,8 @@ def concrete_windows_on_date(
     result = IntervalTree()
     for w in windows:
         cw = w.reify_on_date(d)
-        result.add(Interval(cw.from_time, cw.to_time, [cw]))
+        if isinstance(cw, ConcreteWindow):
+            result.add(Interval(cw.from_time, cw.to_time, [cw]))
     return result
 
 
@@ -167,8 +207,10 @@ def available_windows_between(
     and subtracts the exclusions, decorating any inclusions' data with the
     exclusions that affect it.
     """
-    all_dates = arrow.Arrow.range(
-        "day", from_time.shift(days=-1).datetime, to_time.datetime
+    # all_dates turns out to be a generator, so since we iterate over it twice,
+    # just make it a list
+    all_dates = list(
+        arrow.Arrow.range("day", from_time.shift(days=-1).datetime, to_time.datetime)
     )
     all_inclusions = IntervalTree().union(
         itertools.chain.from_iterable(
@@ -180,16 +222,28 @@ def available_windows_between(
             concrete_windows_on_date(d.date(), exclusions) for d in all_dates
         )
     )
-    # so now we have two interval trees, one with all the inclusions and one with
-    # all the exclusions.  For each exclusion, "chop" the inclusions tree so that
-    # the exclusion is removed
+    # so now we have two interval trees, one with all the inclusions
+    # and one with all the exclusions.  For each exclusion, "chop" the
+    # inclusions tree so that the exclusion is removed.
+    #
+    # we have an irritation, since chop
     for interval in all_exclusions:
         all_inclusions.chop(
             interval.begin, interval.end, lambda x, islower: x.data + interval.data
         )
-    # finally, chop everything from the beginning to from_time and from the end to to_time
+    # print("+++")
+    # for interval in sorted(all_inclusions):
+    #     print(f"{interval.begin}-{interval.end}")
+    # print("+++")
+    #
+    # finally, chop everything from the beginning to from_time and
+    # from the end to to_time
     all_inclusions.chop(all_inclusions.begin(), from_time)
     all_inclusions.chop(to_time, all_inclusions.end())
+    # print("---")
+    # for interval in sorted(all_inclusions):
+    #     print(f"{interval.begin}-{interval.end}")
+    # print("---")
     return all_inclusions
 
 
