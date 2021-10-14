@@ -101,8 +101,9 @@ weekly = DailyWindow(
     ],
 )
 def test_next_window_opening(now, expected):
-    assert next_window(now, {daily}, {weekly}).from_time == expected.from_time
-    assert next_window(now, {daily}, {weekly}).to_time == expected.to_time
+    nw = next_window(now, {daily}, {weekly})
+    assert nw.from_time == expected.from_time
+    assert nw.to_time == expected.to_time
 
 
 # this is a case on 20210920 where a weekday window for IonQ was reified on a Sunday
