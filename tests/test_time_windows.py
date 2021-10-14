@@ -101,8 +101,8 @@ weekly = DailyWindow(
     ],
 )
 def test_next_window_opening(now, expected):
-    assert next_window(now, {daily}, {weekly}).begin == expected.from_time
-    assert next_window(now, {daily}, {weekly}).end == expected.to_time
+    assert next_window(now, {daily}, {weekly}).from_time == expected.from_time
+    assert next_window(now, {daily}, {weekly}).to_time == expected.to_time
 
 
 # this is a case on 20210920 where a weekday window for IonQ was reified on a Sunday
@@ -160,7 +160,7 @@ def test_hypothesis(inclusions, exclusions, now):
             # are weekly we'll get a reschedule
             nw = next_window(anow, inclusions, exclusions, max_days=10)
             if nw is not None:
-                rescheduled = nw.begin
+                rescheduled = nw.from_time
                 assert in_nonexcluded_window(
                     arrow.get(rescheduled), inclusions, exclusions
                 )

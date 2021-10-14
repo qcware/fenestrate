@@ -264,4 +264,13 @@ def next_window(
         now, now.shift(days=max_days), inclusions, exclusions
     )
     sorted_inclusions = sorted(concrete_inclusions)
-    return sorted_inclusions[0] if len(sorted_inclusions) > 0 else None
+    result = (
+        ConcreteWindow(
+            from_time=sorted_inclusions[0].begin,
+            to_time=sorted_inclusions[0].end,
+            ancestors=sorted_inclusions[0].data,
+        )
+        if len(sorted_inclusions) > 0
+        else None
+    )
+    return result
